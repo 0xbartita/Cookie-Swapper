@@ -2,6 +2,8 @@
 
 Burp Suite extension to automatically replace cookies/headers with fresh values before sending requests. Saves you from manually updating expired session tokens across dozens of Repeater tabs.
 
+![Cookie Swapper Demo](Animation.gif)
+
 ## Why?
 
 If you do a lot of web app testing, you know the pain: your session expires, you get new cookies, and now every single HTTP History request has stale tokens. You're retesting a bug, you copy-paste the same cookies into 20 different requests, one by one. It's annoying and wastes time.
