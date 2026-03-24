@@ -27,7 +27,6 @@ Cookie Swapper fixes that. Define your replacement rules once, and every request
 
 1. Grab `CookieSwapper.jar` from [Releases](../../releases)
 2. Burp → Extensions → Add → Java → select the jar
-3. Requires Burp v2023.1+ (Montoya API)
 
 ## How to use
 
