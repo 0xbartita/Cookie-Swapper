@@ -1,49 +1,56 @@
 # Cookie Swapper
 
-Burp Suite extension to automatically replace cookies/headers with fresh values before sending requests. Saves you from manually updating expired session tokens across dozens of Repeater tabs.
+Burp Suite extension that auto-replaces cookies and headers in requests. Stop wasting time copy-pasting session tokens into every request.
 
 ![Cookie Swapper Demo](Animation.gif)
 
 ## Why?
 
-If you do a lot of web app testing, you know the pain: your session expires, you get new cookies, and now every single HTTP History request has stale tokens. You're retesting a bug, you copy-paste the same cookies into 20 different requests, one by one. It's annoying and wastes time.
+You got a retest or a pending bug. You need to replay dozens of requests from HTTP History but your session expired. Now you gotta replace cookies in every single request manually. That's annoying and wastes time.
 
-Cookie Swapper fixes that. Define your replacement rules once, then every request you send through the plugin gets updated cookies/headers automatically.
+Cookie Swapper fixes that. Define your replacement rules once, and every request you send through the plugin gets updated cookies/headers automatically.
 
 ## Features
 
-- `Ctrl+Shift+Q` hotkey to send selected request (works like Ctrl+R for Repeater)
-- Right-click context menu support
-- Cookie and header replacement rules
-- Import cookies directly from clipboard (Cookie Editor JSON format)
-- Repeater-style tabs for each request
-- Send with or without replacements
-- Rule names persist across Burp restarts (values cleared for security)
+- **Hotkey** — `Ctrl+Shift+Q` sends the selected request with fresh tokens (no right-click needed)
+- **Right-click menu** — Send to Cookie Swapper from anywhere in Burp
+- **Replacement rules** — Cookie and header replacement with enable/disable toggle
+- **JSON import** — One-click import from [Cookie Editor](https://cookie-editor.com/) browser extension
+- **Status color coding** — Green (2xx), blue (3xx), orange (4xx), red (5xx) tab colors
+- **Status filters** — Filter tabs by status code to quickly find failing requests
+- **Custom tab bar** — Wrapping tabs with middle-click to close, Close All button, All Tabs dropdown
+- **Send / Send (No Replace)** — Resend with or without applying rules
+- **Persistent rules** — Rule names and types saved to Burp project (values cleared on restart for security)
+- **Delete key** — Select a rule and press Delete to remove it
 
 ## Install
 
 1. Grab `CookieSwapper.jar` from [Releases](../../releases)
-2. Burp > Extensions > Add > Java > select the jar
-3. Needs Burp v2023.1+ (Montoya API)
+2. Burp → Extensions → Add → Java → select the jar
+3. Requires Burp v2023.1+ (Montoya API)
 
 ## How to use
 
-1. Open the **Cookie Swapper** tab
+1. Open the **Cookie Swapper** tab in Burp
 2. Add rules — set type (Cookie or Header), name, and value
-3. Select any request in Proxy History / Site Map / anywhere, hit `Ctrl+Shift+Q`
-4. Request opens in a new tab with replacements applied and response shown
-5. Hit **Send** to resend with current rules, or **Send (No Replace)** to send as-is
-
-### Importing cookies
-
-Export cookies from your browser using [Cookie Editor](https://cookie-editor.com/), then click **Import Cookies JSON** in the plugin. It reads from your clipboard. You can merge with existing rules or replace them.
+3. Or click **Import Cookies JSON** to import from clipboard
+4. Go to Proxy History / Site Map / anywhere and select a request
+5. Press `Ctrl+Shift+Q` or right-click → **Send to Cookie Swapper**
+6. Request opens in a new tab with cookies replaced and response shown
+7. Use the **status filter buttons** (All, 2xx, 3xx, 4xx, 5xx) to filter tabs
+8. Click **Send** to resend with current rules, or **Send (No Replace)** to send as-is
 
 ## Build
 
 ```
-javac -cp montoya-api.jar -d build src/burp/BurpExtender.java
-cd build && jar cf ../CookieSwapper.jar burp/
+./gradlew jar
 ```
+
+Output: `build/libs/CookieSwapper-1.0.0.jar`
+
+## Author
+
+[0xbartita](https://github.com/0xbartita)
 
 ## License
 
