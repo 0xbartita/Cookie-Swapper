@@ -21,8 +21,10 @@ import javax.swing.*;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.datatransfer.*;
+import java.awt.event.*;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.*;
 
 public class BurpExtender implements BurpExtension {
 
@@ -30,8 +32,20 @@ public class BurpExtender implements BurpExtension {
     private JPanel mainPanel;
     private DefaultTableModel rulesTableModel;
     private JTable rulesTable;
-    private JTabbedPane requestTabs;
     private int tabCounter = 0;
+    private final ExecutorService requestExecutor = Executors.newFixedThreadPool(3);
+
+    // Custom tab system
+    private JPanel tabBarPanel;
+    private JScrollPane tabBarScroll;
+    private JPanel contentPanel;
+    private CardLayout contentLayout;
+    private final Map<String, JToggleButton> tabButtons = new LinkedHashMap<>();
+    private final Map<String, Component> tabContents = new LinkedHashMap<>();
+    private final Map<String, Integer> tabStatusCodes = new LinkedHashMap<>();
+    private String selectedTabId = null;
+    private ButtonGroup tabGroup = new ButtonGroup();
+    private String activeFilter = "all";
 
     @Override
     public void initialize(MontoyaApi api) {
@@ -93,7 +107,10 @@ public class BurpExtender implements BurpExtension {
             });
         });
 
-        api.extension().registerUnloadingHandler(() -> saveSettings());
+        api.extension().registerUnloadingHandler(() -> {
+            requestExecutor.shutdownNow();
+            saveSettings();
+        });
 
         api.logging().logToOutput("Cookie Swapper v1.0 by 0xbartita loaded.");
         api.logging().logToOutput("Hotkey: Ctrl+Shift+Q (change in Burp Settings > Hotkeys)");
@@ -123,6 +140,15 @@ public class BurpExtender implements BurpExtension {
         rulesTable = new JTable(rulesTableModel);
         rulesTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
         rulesTable.setSurrendersFocusOnKeystroke(true);
+        rulesTable.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_DELETE && !rulesTable.isEditing()) {
+                    int[] rows = rulesTable.getSelectedRows();
+                    for (int i = rows.length - 1; i >= 0; i--) rulesTableModel.removeRow(rows[i]);
+                }
+            }
+        });
 
         JComboBox<String> typeCombo = new JComboBox<>(new String[]{"Cookie", "Header"});
         rulesTable.getColumnModel().getColumn(0).setCellEditor(new DefaultCellEditor(typeCombo));
@@ -165,10 +191,101 @@ public class BurpExtender implements BurpExtension {
         rulesPanel.add(rulesScroll, BorderLayout.CENTER);
         rulesPanel.add(rulesBtnPanel, BorderLayout.SOUTH);
 
-        requestTabs = new JTabbedPane();
-        requestTabs.setBorder(BorderFactory.createTitledBorder("Requests"));
+        // Custom tab bar with wrapping, limited to 3 rows
+        tabBarPanel = new JPanel() {
+            @Override
+            public Dimension getPreferredSize() {
+                // Force wrap by using parent's width
+                int width = getParent() != null ? getParent().getWidth() : 800;
+                if (width <= 0) width = 800;
+                FlowLayout fl = (FlowLayout) getLayout();
+                int x = fl.getHgap(), y = fl.getVgap(), rowHeight = 0;
+                for (Component c : getComponents()) {
+                    if (!c.isVisible()) continue;
+                    Dimension d = c.getPreferredSize();
+                    if (x + d.width + fl.getHgap() > width) {
+                        y += rowHeight + fl.getVgap();
+                        x = fl.getHgap();
+                        rowHeight = 0;
+                    }
+                    x += d.width + fl.getHgap();
+                    rowHeight = Math.max(rowHeight, d.height);
+                }
+                y += rowHeight + fl.getVgap();
+                return new Dimension(width, y);
+            }
+        };
+        tabBarPanel.setLayout(new FlowLayout(FlowLayout.LEFT, 3, 3));
+        tabBarScroll = new JScrollPane(tabBarPanel);
+        tabBarScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        tabBarScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        tabBarScroll.setBorder(null);
+        tabBarScroll.setPreferredSize(new Dimension(0, 105)); // ~3 rows at default font
+        tabBarScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 105));
+        tabBarScroll.setMinimumSize(new Dimension(0, 105));
+        tabBarScroll.getViewport().addChangeListener(e -> {
+            tabBarPanel.revalidate();
+        });
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, rulesPanel, requestTabs);
+        contentLayout = new CardLayout();
+        contentPanel = new JPanel(contentLayout);
+
+        JPanel requestsPanel = new JPanel(new BorderLayout());
+        JPanel headerLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+        JLabel requestsLabel = new JLabel("Requests");
+        requestsLabel.setFont(requestsLabel.getFont().deriveFont(Font.BOLD));
+        JButton closeAllBtn = new JButton("Close All");
+        closeAllBtn.addActionListener(e -> closeAllTabs());
+        JToggleButton filterAll = new JToggleButton("All");
+        JToggleButton filter2xx = new JToggleButton("2xx");
+        JToggleButton filter3xx = new JToggleButton("3xx");
+        JToggleButton filter4xx = new JToggleButton("4xx");
+        JToggleButton filter5xx = new JToggleButton("5xx");
+        filterAll.setSelected(true);
+        filter2xx.setForeground(new Color(34, 197, 94));
+        filter3xx.setForeground(new Color(59, 130, 246));
+        filter4xx.setForeground(new Color(249, 115, 22));
+        filter5xx.setForeground(new Color(239, 68, 68));
+        ButtonGroup filterGroup = new ButtonGroup();
+        for (JToggleButton fb : new JToggleButton[]{filterAll, filter2xx, filter3xx, filter4xx, filter5xx}) {
+            fb.setMargin(new Insets(2, 6, 2, 6));
+            fb.setFocusable(false);
+            filterGroup.add(fb);
+        }
+        filterAll.addActionListener(e -> applyFilter("all"));
+        filter2xx.addActionListener(e -> applyFilter("2xx"));
+        filter3xx.addActionListener(e -> applyFilter("3xx"));
+        filter4xx.addActionListener(e -> applyFilter("4xx"));
+        filter5xx.addActionListener(e -> applyFilter("5xx"));
+
+        headerLeft.add(requestsLabel);
+        headerLeft.add(closeAllBtn);
+        headerLeft.add(Box.createHorizontalStrut(10));
+        headerLeft.add(filterAll);
+        headerLeft.add(filter2xx);
+        headerLeft.add(filter3xx);
+        headerLeft.add(filter4xx);
+        headerLeft.add(filter5xx);
+
+        JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 2));
+        JButton overflowBtn = new JButton("All Tabs \u25BE");
+        overflowBtn.addActionListener(e -> showTabOverflowMenu(overflowBtn));
+        headerRight.add(overflowBtn);
+
+        JPanel requestsHeader = new JPanel(new BorderLayout());
+        requestsHeader.add(headerLeft, BorderLayout.WEST);
+        requestsHeader.add(headerRight, BorderLayout.EAST);
+
+        JPanel tabTopPanel = new JPanel(new BorderLayout());
+        tabTopPanel.add(requestsHeader, BorderLayout.NORTH);
+        tabTopPanel.add(tabBarScroll, BorderLayout.CENTER);
+
+        JSplitPane tabSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tabTopPanel, contentPanel);
+        tabSplit.setResizeWeight(0.0);
+        tabSplit.setDividerSize(6);
+        requestsPanel.add(tabSplit, BorderLayout.CENTER);
+
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, rulesPanel, requestsPanel);
         splitPane.setResizeWeight(0.2);
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
@@ -178,26 +295,30 @@ public class BurpExtender implements BurpExtension {
     // ==================== REQUEST PROCESSING ====================
 
     private void processMessage(HttpRequestResponse original) {
-        new Thread(() -> {
+        // Read rules on EDT before sending to background thread
+        List<ReplacementRule> rules = getRules();
+        requestExecutor.submit(() -> {
             try {
                 HttpRequest request = original.request();
-                HttpRequest modifiedRequest = applyReplacements(request);
+                HttpRequest modifiedRequest = applyReplacements(request, rules);
                 HttpRequestResponse response = api.http().sendRequest(modifiedRequest);
-                SwingUtilities.invokeLater(() -> addRequestTab(modifiedRequest, response.response()));
+                SwingUtilities.invokeAndWait(() -> addRequestTab(modifiedRequest, response.response()));
             } catch (Exception ex) {
                 api.logging().logToError("Error: " + ex.getMessage());
             }
-        }).start();
+        });
     }
 
     private void addRequestTab(HttpRequest modifiedRequest, HttpResponse response) {
         tabCounter++;
+        String tabId = "tab_" + tabCounter;
 
-        String method = modifiedRequest.method();
         String path = modifiedRequest.path();
-        if (path.length() > 40) path = path.substring(0, 37) + "...";
+        int qIdx = path.indexOf('?');
+        if (qIdx >= 0) path = path.substring(0, qIdx);
+        if (path.length() > 50) path = path.substring(0, 47) + "...";
         int statusCode = response != null ? response.statusCode() : 0;
-        String tabTitle = "#" + tabCounter + " [" + (statusCode > 0 ? statusCode : "?") + "] " + method + " " + path;
+        String tabTitle = "#" + tabCounter + " [" + (statusCode > 0 ? statusCode : "?") + "] " + path;
 
         burp.api.montoya.ui.editor.HttpRequestEditor reqEditor = api.userInterface().createHttpRequestEditor();
         burp.api.montoya.ui.editor.HttpResponseEditor resEditor = api.userInterface().createHttpResponseEditor();
@@ -251,37 +372,134 @@ public class BurpExtender implements BurpExtension {
         split.setLeftComponent(reqPanel);
         split.setRightComponent(resPanel);
 
-        requestTabs.addTab(tabTitle, split);
-        int tabIndex = requestTabs.getTabCount() - 1;
-        requestTabs.setTabComponentAt(tabIndex, createTabHeader(tabTitle, split));
-        requestTabs.setSelectedIndex(tabIndex);
+        // Create tab button with color
+        Color tabColor = statusCode >= 500 ? new Color(239, 68, 68) :
+                          statusCode >= 400 ? new Color(249, 115, 22) :
+                          statusCode >= 300 ? new Color(59, 130, 246) :
+                          statusCode >= 200 ? new Color(34, 197, 94) : null;
+
+        JToggleButton tabBtn = new JToggleButton(tabTitle);
+        tabBtn.setMargin(new Insets(4, 10, 4, 10));
+        tabBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        if (tabColor != null) tabBtn.setForeground(tabColor);
+
+        tabBtn.addActionListener(e -> selectTab(tabId));
+        tabBtn.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isMiddleMouseButton(e)) {
+                    closeTab(tabId);
+                }
+            }
+        });
+
+        tabGroup.add(tabBtn);
+        tabButtons.put(tabId, tabBtn);
+        tabContents.put(tabId, split);
+        tabStatusCodes.put(tabId, statusCode);
+        tabBarPanel.add(tabBtn);
+        contentPanel.add(split, tabId);
+        tabBtn.setVisible(matchesFilter(statusCode));
+
+        selectTab(tabId);
+        tabBarPanel.revalidate();
+        tabBarPanel.repaint();
+
+        // Scroll to bottom to show new tab
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vBar = tabBarScroll.getVerticalScrollBar();
+            vBar.setValue(vBar.getMaximum());
+        });
     }
 
-    private JPanel createTabHeader(String title, Component tabContent) {
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 0));
-        header.setOpaque(false);
-        JLabel titleLabel = new JLabel(title);
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 5));
-        JButton closeBtn = new JButton("\u00D7");
-        closeBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
-        closeBtn.setMargin(new Insets(0, 3, 0, 3));
-        closeBtn.setContentAreaFilled(false);
-        closeBtn.setBorderPainted(false);
-        closeBtn.setFocusable(false);
-        closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        closeBtn.addActionListener(e -> {
-            int idx = requestTabs.indexOfComponent(tabContent);
-            if (idx >= 0) requestTabs.removeTabAt(idx);
-        });
-        header.add(titleLabel);
-        header.add(closeBtn);
-        return header;
+    private void selectTab(String tabId) {
+        selectedTabId = tabId;
+        JToggleButton btn = tabButtons.get(tabId);
+        if (btn != null) btn.setSelected(true);
+        contentLayout.show(contentPanel, tabId);
+    }
+
+    private void closeTab(String tabId) {
+        JToggleButton btn = tabButtons.remove(tabId);
+        Component content = tabContents.remove(tabId);
+        tabStatusCodes.remove(tabId);
+        if (btn != null) {
+            tabGroup.remove(btn);
+            tabBarPanel.remove(btn);
+        }
+        if (content != null) contentPanel.remove(content);
+
+        // Select another tab if we closed the active one
+        if (tabId.equals(selectedTabId)) {
+            if (!tabButtons.isEmpty()) {
+                String lastId = null;
+                for (String id : tabButtons.keySet()) lastId = id;
+                selectTab(lastId);
+            } else {
+                selectedTabId = null;
+            }
+        }
+        tabBarPanel.revalidate();
+        tabBarPanel.repaint();
+    }
+
+    private void showTabOverflowMenu(Component anchor) {
+        if (tabButtons.isEmpty()) return;
+        JPopupMenu menu = new JPopupMenu();
+        for (Map.Entry<String, JToggleButton> entry : tabButtons.entrySet()) {
+            String id = entry.getKey();
+            JToggleButton btn = entry.getValue();
+            JMenuItem item = new JMenuItem(btn.getText());
+            item.setForeground(btn.getForeground());
+            if (id.equals(selectedTabId)) item.setFont(item.getFont().deriveFont(Font.BOLD));
+            item.addActionListener(e -> selectTab(id));
+            menu.add(item);
+        }
+        menu.show(anchor, 0, anchor.getHeight());
+    }
+
+    private void closeAllTabs() {
+        tabButtons.clear();
+        tabContents.clear();
+        tabStatusCodes.clear();
+        tabGroup = new ButtonGroup();
+        tabBarPanel.removeAll();
+        contentPanel.removeAll();
+        selectedTabId = null;
+        tabBarPanel.revalidate();
+        tabBarPanel.repaint();
+        contentPanel.revalidate();
+        contentPanel.repaint();
+    }
+
+    private boolean matchesFilter(int statusCode) {
+        if ("all".equals(activeFilter)) return true;
+        if ("2xx".equals(activeFilter)) return statusCode >= 200 && statusCode < 300;
+        if ("3xx".equals(activeFilter)) return statusCode >= 300 && statusCode < 400;
+        if ("4xx".equals(activeFilter)) return statusCode >= 400 && statusCode < 500;
+        if ("5xx".equals(activeFilter)) return statusCode >= 500;
+        return true;
+    }
+
+    private void applyFilter(String filter) {
+        activeFilter = filter;
+        for (Map.Entry<String, JToggleButton> entry : tabButtons.entrySet()) {
+            String id = entry.getKey();
+            JToggleButton btn = entry.getValue();
+            Integer sc = tabStatusCodes.get(id);
+            btn.setVisible(sc != null && matchesFilter(sc));
+        }
+        tabBarPanel.revalidate();
+        tabBarPanel.repaint();
     }
 
     // ==================== REPLACEMENT LOGIC ====================
 
     private HttpRequest applyReplacements(HttpRequest request) {
-        List<ReplacementRule> rules = getRules();
+        return applyReplacements(request, getRules());
+    }
+
+    private HttpRequest applyReplacements(HttpRequest request, List<ReplacementRule> rules) {
         if (rules.isEmpty()) return request;
 
         List<HttpHeader> headers = new ArrayList<>(request.headers());
@@ -387,20 +605,29 @@ public class BurpExtender implements BurpExtension {
                 return;
             }
 
-            int choice = JOptionPane.showOptionDialog(mainPanel,
-                    "Found " + cookies.size() + " cookies. How to import?",
-                    "Import Cookies", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
-                    null, new String[]{"Merge (update existing, add new)", "Replace all", "Cancel"}, "Merge");
-            if (choice == 2 || choice == JOptionPane.CLOSED_OPTION) return;
+            // If no existing cookie rules, just add directly without asking
+            boolean hasExistingCookies = false;
+            for (int i = 0; i < rulesTableModel.getRowCount(); i++) {
+                if ("Cookie".equals(rulesTableModel.getValueAt(i, 0))) { hasExistingCookies = true; break; }
+            }
 
-            if (choice == 1) {
-                for (int i = rulesTableModel.getRowCount() - 1; i >= 0; i--)
-                    if ("Cookie".equals(rulesTableModel.getValueAt(i, 0))) rulesTableModel.removeRow(i);
+            int choice = 0; // default to merge
+            if (hasExistingCookies) {
+                choice = JOptionPane.showOptionDialog(mainPanel,
+                        "Found " + cookies.size() + " cookies. How to import?",
+                        "Import Cookies", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                        null, new String[]{"Merge (update existing, add new)", "Replace all", "Cancel"}, "Merge");
+                if (choice == 2 || choice == JOptionPane.CLOSED_OPTION) return;
+
+                if (choice == 1) {
+                    for (int i = rulesTableModel.getRowCount() - 1; i >= 0; i--)
+                        if ("Cookie".equals(rulesTableModel.getValueAt(i, 0))) rulesTableModel.removeRow(i);
+                }
             }
 
             for (String[] cookie : cookies) {
                 String name = cookie[0], value = cookie[1];
-                if (choice == 0) {
+                if (choice == 0 && hasExistingCookies) {
                     boolean found = false;
                     for (int i = 0; i < rulesTableModel.getRowCount(); i++) {
                         if ("Cookie".equals(rulesTableModel.getValueAt(i, 0))
