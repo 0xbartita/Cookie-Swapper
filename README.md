@@ -6,7 +6,7 @@ Burp Suite extension that auto-replaces cookies and headers in requests. Stop wa
 
 ## Why?
 
-You got a retest or a pending bug. You need to replay dozens of requests from HTTP History but your session expired. Now you gotta replace cookies in every single request manually. That's annoying and wastes time.
+You got a retest, a needs more info bug, or just expired sessions. You need to replay dozens of requests from HTTP History and Repeater but your session expired. Now you gotta replace cookies in every single request manually. That's annoying and wastes time.
 
 Cookie Swapper fixes that. Define your replacement rules once, and every request you send through the plugin gets updated cookies/headers automatically.
 
