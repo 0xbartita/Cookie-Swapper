@@ -48,10 +48,6 @@ Cookie Swapper fixes that. Define your replacement rules once, and every request
 
 Output: `build/libs/CookieSwapper-1.0.0.jar`
 
-## Author
-
-[0xbartita](https://github.com/0xbartita)
-
 ## License
 
 MIT
