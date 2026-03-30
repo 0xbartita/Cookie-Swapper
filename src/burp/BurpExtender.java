@@ -289,6 +289,40 @@ public class BurpExtender implements BurpExtension {
         splitPane.setResizeWeight(0.2);
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
+        // Global key dispatcher for Ctrl+W, Ctrl+Alt+Right/Left
+        // Only checks if Cookie Swapper tab is visible — no strict focus check,
+        // so shortcuts work even when Burp's editors have focus.
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+            if (e.getID() != KeyEvent.KEY_PRESSED) return false;
+            if (!mainPanel.isShowing()) return false;
+
+            int mod = e.getModifiersEx();
+            boolean ctrl = (mod & InputEvent.CTRL_DOWN_MASK) != 0;
+            boolean alt = (mod & InputEvent.ALT_DOWN_MASK) != 0;
+            boolean shift = (mod & InputEvent.SHIFT_DOWN_MASK) != 0;
+            int key = e.getKeyCode();
+
+            // Ctrl+W = close current tab
+            if (ctrl && !alt && !shift && key == KeyEvent.VK_W) {
+                if (selectedTabId != null) SwingUtilities.invokeLater(() -> closeTab(selectedTabId));
+                e.consume();
+                return true;
+            }
+            // Ctrl+] = next tab
+            if (ctrl && !alt && !shift && key == KeyEvent.VK_CLOSE_BRACKET) {
+                SwingUtilities.invokeLater(() -> selectNextVisibleTab(1));
+                e.consume();
+                return true;
+            }
+            // Ctrl+[ = previous tab
+            if (ctrl && !alt && !shift && key == KeyEvent.VK_OPEN_BRACKET) {
+                SwingUtilities.invokeLater(() -> selectNextVisibleTab(-1));
+                e.consume();
+                return true;
+            }
+            return false;
+        });
+
         api.userInterface().applyThemeToComponent(mainPanel);
     }
 
@@ -420,6 +454,21 @@ public class BurpExtender implements BurpExtension {
     }
 
     private void closeTab(String tabId) {
+        // Find the next visible tab BEFORE removing, so we pick the right neighbor
+        String nextSelect = null;
+        if (tabId.equals(selectedTabId)) {
+            List<String> visibleIds = new ArrayList<>();
+            for (Map.Entry<String, JToggleButton> entry : tabButtons.entrySet()) {
+                Integer sc = tabStatusCodes.get(entry.getKey());
+                if (sc != null && matchesFilter(sc)) visibleIds.add(entry.getKey());
+            }
+            int idx = visibleIds.indexOf(tabId);
+            if (idx >= 0) {
+                if (idx + 1 < visibleIds.size()) nextSelect = visibleIds.get(idx + 1);       // next
+                else if (idx - 1 >= 0) nextSelect = visibleIds.get(idx - 1);                  // previous if last
+            }
+        }
+
         JToggleButton btn = tabButtons.remove(tabId);
         Component content = tabContents.remove(tabId);
         tabStatusCodes.remove(tabId);
@@ -429,18 +478,29 @@ public class BurpExtender implements BurpExtension {
         }
         if (content != null) contentPanel.remove(content);
 
-        // Select another tab if we closed the active one
         if (tabId.equals(selectedTabId)) {
-            if (!tabButtons.isEmpty()) {
-                String lastId = null;
-                for (String id : tabButtons.keySet()) lastId = id;
-                selectTab(lastId);
+            if (nextSelect != null) {
+                selectTab(nextSelect);
             } else {
                 selectedTabId = null;
             }
         }
         tabBarPanel.revalidate();
         tabBarPanel.repaint();
+    }
+
+    private void selectNextVisibleTab(int direction) {
+        if (tabButtons.isEmpty()) return;
+        List<String> visibleIds = new ArrayList<>();
+        for (Map.Entry<String, JToggleButton> entry : tabButtons.entrySet()) {
+            Integer sc = tabStatusCodes.get(entry.getKey());
+            if (sc != null && matchesFilter(sc)) visibleIds.add(entry.getKey());
+        }
+        if (visibleIds.isEmpty()) return;
+        int idx = visibleIds.indexOf(selectedTabId);
+        if (idx < 0) idx = 0;
+        else idx = (idx + direction + visibleIds.size()) % visibleIds.size();
+        selectTab(visibleIds.get(idx));
     }
 
     private void showTabOverflowMenu(Component anchor) {
