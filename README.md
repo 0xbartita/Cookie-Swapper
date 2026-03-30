@@ -19,6 +19,7 @@ Cookie Swapper fixes that. Define your replacement rules once, and every request
 - **Status color coding** — Green (2xx), blue (3xx), orange (4xx), red (5xx) tab colors
 - **Status filters** — Filter tabs by status code to quickly find failing requests
 - **Custom tab bar** — Wrapping tabs with middle-click to close, Close All button, All Tabs dropdown
+- **Keyboard shortcuts** — `Ctrl+W` close tab, `Ctrl+]` next tab, `Ctrl+[` previous tab
 - **Send / Send (No Replace)** — Resend with or without applying rules
 - **Persistent rules** — Rule names and types saved to Burp project (values cleared on restart for security)
 - **Delete key** — Select a rule and press Delete to remove it
